@@ -1,8 +1,10 @@
-# Streaming Hand-Object Segmentation
+# Hand-Object Segmentation & Sample from RGB Frames
 
-### Packaged from [EgoHOS](https://github.com/owenzlz/EgoHOS)
+### Segmentation is Packaged from [EgoHOS](https://github.com/owenzlz/EgoHOS)
+### Depth Prediction is from [ZeoDepth](https://github.com/isl-org/ZoeDepth)
 
-![pic](pic.png)
+
+![demo](assets/pcd.png)
 
 ## Installation 
 1. Clone the repository
@@ -15,6 +17,8 @@ cd HO-Segment
 ```bash
 # conda
 conda env create -f environment.yml
+conda activate hosegment
+
 # mmcv-full
 pip install mmcv-full==1.6.0 -f https://download.openmmlab.com/mmcv/dist/cu116/torch1.12.0/index.html
 ## Try if the above command fails
@@ -47,7 +51,29 @@ res: dict({
 })
 ```
 
-2. Streaming
+2. PointCloud Sampling
+```python
+from modules import Depth
+
+depth = Depth()
+
+depth = depth.infer(
+    image: Union[np.ndarray, str, Path] # image data or filepath
+)
+
+depth: np.ndarray # float64 depth map
+
+pcds = depth.sample(
+    depth: np.ndarray, # depth image (float)
+    masks: Union[np.ndarray, List[np.ndarray]] = None, # masks for sampling 
+    K: Optional[np.ndarray] = None # camera intrinsic
+)
+
+pcds: List[np.ndarray] # list of points sampled with masks
+```
+
+
+3. Streaming
 ```python
 from modules import Streaming
 
@@ -66,15 +92,33 @@ res = stream.get()
 res: Any # result of the action running on back loop
 ```
 
-## Usage  
-1. **Run real-time view on web**
+## Usage
+
+1. **Run real-time segmentation view on web**
 ```bash
 streamlit run app.py
-```
+```  
+![stream](assets/stream.png)
 
-2. **Predict single image**
+2. **Predict segmentation from single image**
 ```bash
 python -m scripts.predict_image --image ${path/to/input} --save ${path/to/output}
 
-## demo: python -m scripts.predict_image --image demo/input.jpg --sace demo/result.png
+## demo: python -m scripts.predict_image --image demo/images/1.jpg --sace demo/out/1.seg.png
+```
+![seg](assets/seg.png)
+
+
+3. **Predict Hand-Object pointclouds from single image**  
+```bash
+python -m scripts.predict_pcd --image ${path/to/input} --save{path/to/output}
+
+## demo: python -m scripts.predict_pcd --image demo/images/1.jpg --sace demo/out/1.pcd.png
+```
+![pcd](assets/pcd.png)
+
+
+4. **Predict Hand-Object pointclouds from video**  
+```bash
+python -m scripts.predict_pcd --video ${path/to/input} --save{path/to/output}
 ```

@@ -3,3 +3,6 @@
 
 # checkpoints
 work_dirs
+
+# data
+demo/videos/*

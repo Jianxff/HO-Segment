@@ -1,4 +1,4 @@
-name: hosegments
+name: hosegment
 channels:
   - pytorch 
   - conda-forge   
@@ -16,3 +16,6 @@ dependencies:
     - imageio-ffmpeg
     - opencv-python
     - streamlit-webrtc
+    - timm==0.6.7
+    - tqdm
+    - matplotlib

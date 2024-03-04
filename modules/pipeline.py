@@ -116,7 +116,8 @@ class Pipeline:
         seg_color[seg_result == 4] = (0,    255, 255)   # right_object1
         seg_color[seg_result == 5] = (0,    255, 0)     # two_object1
         vis = image * (1 - alpha) + seg_color * alpha
-
+        vis = vis.astype(np.uint8)
+        
         # save
         if save:
             cv2.imwrite(str(save), vis)

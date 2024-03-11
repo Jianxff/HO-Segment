@@ -1,8 +1,8 @@
-# Hand-Object Segmentation & Sample from RGB Frames
+# Hand-Object Segmentation & PointCloud Sampling from RGB Image
 
 ### Segmentation is Packaged from [EgoHOS](https://github.com/owenzlz/EgoHOS)
 ### Depth Prediction is from [ZeoDepth](https://github.com/isl-org/ZoeDepth)
-
+### Fast PointCloud Sampling is from [Open3D](https://www.open3d.org/)
 
 ![demo](assets/pcd.png)
 
@@ -63,10 +63,11 @@ depth = depth.infer(
 
 depth: np.ndarray # float64 depth map
 
-pcds = depth.sample(
+pcds = depth.sample_pointcloud_open3d(
     depth: np.ndarray, # depth image (float)
     masks: Union[np.ndarray, List[np.ndarray]] = None, # masks for sampling 
-    K: Optional[np.ndarray] = None # camera intrinsic
+    neighbors: Optional[int] = 20, # sample params
+    std_ratio: Optional[float] = 2.0, # sample params
 )
 
 pcds: List[np.ndarray] # list of points sampled with masks
@@ -96,11 +97,18 @@ res: Any # result of the action running on back loop
 
 1. **Run real-time segmentation view on web**
 ```bash
-streamlit run app.py
+streamlit run app_stream.py
 ```  
 ![stream](assets/stream.png)
 
-2. **Predict segmentation from single image**
+
+2. **Predict Hand-Object pointclouds from single image on web**
+```bash
+streamlit run app_image.py
+```
+![app](assets/app.png)
+
+3. **Predict segmentation from single image**
 ```bash
 python -m scripts.predict_image --image ${path/to/input} --save ${path/to/output}
 
@@ -109,7 +117,7 @@ python -m scripts.predict_image --image ${path/to/input} --save ${path/to/output
 ![seg](assets/seg.png)
 
 
-3. **Predict Hand-Object pointclouds from single image**  
+4. **Predict Hand-Object pointclouds from single image**  
 ```bash
 python -m scripts.predict_pcd --image ${path/to/input} --save{path/to/output}
 
@@ -118,7 +126,7 @@ python -m scripts.predict_pcd --image ${path/to/input} --save{path/to/output}
 ![pcd](assets/pcd.png)
 
 
-4. **Predict Hand-Object pointclouds from video**  
+5. **Predict Hand-Object pointclouds from video**  
 ```bash
 python -m scripts.predict_pcd --video ${path/to/input} --save{path/to/output}
 ```

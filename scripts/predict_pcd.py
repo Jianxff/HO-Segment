@@ -1,6 +1,7 @@
 # Standard Library
 from pathlib import Path
 import argparse
+import time
 
 # Third Party
 import cv2
@@ -20,29 +21,45 @@ def predict(frame: np.ndarray):
     if depth_map is None:
         return None
 
-    depth_map_gray = depth.gray(depth_map, bgr=True)
-
+    st = time.time()
     # segment
     seg_mask = pipe(frame)
     hand_mask, obj_mask = seg_mask['hands'], seg_mask['objects']
-    seg_view = pipe.visualize(frame, seg_mask)
+    nd = time.time()
+    print(f"Segment Time: {nd-st:.2f} sec")
+    st = nd
 
     # sample
-    pcds = depth.sample(
+    # pcds = depth.sample(
+    #     depth=depth_map,
+    #     masks=[hand_mask, obj_mask]
+    # )
+
+    # nd = time.time()
+    # print(f"Sample Time: {nd-st:.2f} sec")
+    # st = nd
+
+    # pcds = depth.filter(pcds)
+
+    # nd = time.time()
+    # print(f"Filter Time: {nd-st:.2f} sec")
+    pcds = depth.sample_pointcloud_open3d(
         depth=depth_map,
         masks=[hand_mask, obj_mask]
     )
-
+    nd = time.time()
+    print(f'Filter Sample Time: {nd-st:.2f} sec')
+    st = nd
+    
     # show
-    blank = np.ones_like(frame) * 255
-
+    seg_view = pipe.visualize(frame, seg_mask)
     pcd_view = depth.visualize_pointcloud(
         size=(frame.shape[1], frame.shape[0]),
-        pcds=[
-            depth.downsample_pointcloud(pcds[0], -50), 
-            depth.downsample_pointcloud(pcds[1], -50),
-        ],
-        # pcds=[pcds[0],pcds[1]],
+        # pcds=[
+        #     depth.downsample_pointcloud(pcds[0], -50), 
+        #     depth.downsample_pointcloud(pcds[1], -50),
+        # ],
+        pcds=[pcds[0],pcds[1]],
         rgbs=[
             (244,194,155),
             (83,109,254)
@@ -50,10 +67,15 @@ def predict(frame: np.ndarray):
         s=0.5
     )
 
+
+    depth_map_gray = depth.gray(depth_map, bgr=True)
     depth_view = cv2.resize(depth_map_gray,dsize=None,fx=0.3,fy=0.3)
     seg_view[0:depth_view.shape[0], 0:depth_view.shape[1]] = depth_view
 
     view = cv2.hconcat([seg_view, pcd_view])
+
+    nd = time.time()
+    print(f"Visualize Time: {nd-st:.2f} sec")
 
     return view
 
@@ -69,8 +91,8 @@ def predict_video(args):
     if not cap.isOpened():
         raise ValueError("Video file could not be opened")
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    # height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     out = None
 
     for _ in tqdm(range(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))):  

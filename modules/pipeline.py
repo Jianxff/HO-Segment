@@ -2,16 +2,17 @@
 from pathlib import Path
 import os
 from typing import Optional, Union, Any
+import threading
 
 # Third Party
 import torch
 import cv2
 import numpy as np
 import argparse
+from cvzone.HandTrackingModule import HandDetector
 
 # MM Segmentation
-import mmcv
-from mmseg.apis import inference_segmentor, init_segmentor, InferencePipe
+from mmseg.apis import init_segmentor, InferencePipe
 
 class Pipeline:
     def __init__(
@@ -57,6 +58,8 @@ class Pipeline:
             )
         )
 
+        self.hand_detector = HandDetector(detectionCon=0.1, maxHands=2)
+
         return self
 
     @torch.no_grad()
@@ -66,21 +69,51 @@ class Pipeline:
         hands_only: Optional[bool] = False
     ) -> dict[str, np.ndarray]:
         # inference
-        seg_result_hands = self.pipe_hands(image)
+        seg_data = {'hands': None, 'objects': 'None'}
+        bound_data = np.zeros((image.shape[0], image.shape[1]))
 
-        if hands_only:
-            return {
-                'hands': seg_result_hands,
-                'objects': np.zeros_like(seg_result_hands)
-            }
+        def target_ho(seg_data):
+            seg_result_hands = self.pipe_hands(image)
 
-        seg_result_cb = self.pipe_cb(image, seg_result_hands)
-        seg_result_obj = self.pipe_obj(image, seg_result_hands, seg_result_cb)
+            if hands_only:
+                seg_data['hands'] = seg_result_hands
+                seg_data['objects'] = np.zeros_like(seg_result_hands)
+                return
 
-        return {
-            'hands': seg_result_hands, 
-            'objects': seg_result_obj
-        }
+            seg_result_cb = self.pipe_cb(image, seg_result_hands)
+            seg_result_obj = self.pipe_obj(image, seg_result_hands, seg_result_cb)
+
+            seg_data['hands'] = seg_result_hands
+            seg_data['objects'] = seg_result_obj         
+
+        def target_bound(bound_data):
+            hands, _ = self.hand_detector.findHands(image, draw=False)
+            if hands:
+                for hand in hands:
+                    imh, imw = image.shape[:2]
+                    x, y, w, h = hand['bbox']
+                    x, y = max(0, x - 20), max(0, y - 20)
+                    max_x = int(x + w * 1.3)
+                    max_y = int(y + h * 1.3)
+                    # set to 1
+                    bound_data[
+                        y : min(imh, max_y),
+                        x : min(imw, max_x)
+                    ] = 1
+            bound_data = bound_data.astype(np.uint8)
+
+        # t1 = threading.Thread(target=target_ho, args=(seg_data,))
+        # t2 = threading.Thread(target=target_bound, args=(bound_data,))
+        # t1.start()
+        # t2.start()
+        # t1.join()
+        # t2.join()
+        target_ho(seg_data)
+        target_bound(bound_data)
+
+        seg_data['hands'][bound_data == 0] = 0
+        return seg_data
+
 
     def __call__(
         self,

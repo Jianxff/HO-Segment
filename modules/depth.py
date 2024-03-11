@@ -8,6 +8,7 @@ import torch
 import cv2
 import numpy as np
 from PIL import Image
+import open3d
 import matplotlib.pyplot as plt
 
 class Depth:
@@ -31,10 +32,12 @@ class Depth:
         
         if image is None:
             return None
-        
+        # st = time.time()
         depth = self.zoe_.infer_pil(
             Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         )
+        # nd = time.time()
+        # print(f"Depth Time: {nd-st:.2f} sec")
 
         return depth
 
@@ -63,6 +66,39 @@ class Depth:
             [0, 0, 1]
         ], dtype=np.float32)
         return K
+    
+    @staticmethod
+    def sample_pointcloud_open3d(
+        depth: np.ndarray,
+        masks: Union[np.ndarray, List[np.ndarray]] = None,
+        # K: Optional[np.ndarray] = None,
+        neighbors: Optional[int] = 20,
+        std_ratio: Optional[float] = 2.0,
+    ) -> List[np.ndarray]:
+        if not isinstance(masks, list):
+            masks = [masks]
+        h, w = depth.shape
+        K = open3d.camera.PinholeCameraIntrinsic(
+            width=w, height=h,
+            fx = max(w, h), fy = max(w, h),
+            cx = w//2, cy = h//2
+        )
+        result = []
+        for mask in masks:
+            # select from mask
+            depth_masked = depth.copy()
+            depth_masked[mask == 0] = 0
+
+            depth_masked = open3d.geometry.Image(depth_masked)
+            pcd = open3d.geometry.PointCloud.create_from_depth_image(
+                depth_masked, K,
+                depth_scale=1.0, depth_trunc=100.0,    
+            )
+            cl, ind = pcd.remove_statistical_outlier(nb_neighbors=neighbors, std_ratio=std_ratio)
+            filtered_pcd = pcd.select_by_index(ind)
+            # to numpy
+            result.append(np.asarray(filtered_pcd.points))
+        return result
 
     @staticmethod
     def sample(
@@ -88,6 +124,26 @@ class Depth:
             result.append(pcd)
         
         return result
+
+    @staticmethod
+    def filter(
+        pcds: List[np.ndarray],
+        neighbors: Optional[float] = 20,
+        std_ratio: Optional[float] = 2.0
+    ) -> List[np.ndarray]:
+        result = []
+        for points in pcds:
+            if len(points) == 0:
+                result.append([])
+                continue
+            pcd = open3d.geometry.PointCloud()
+            pcd.points = open3d.utility.Vector3dVector(points)
+            cl, ind = pcd.remove_statistical_outlier(nb_neighbors=neighbors, std_ratio=std_ratio)
+            inliers = pcd.select_by_index(ind)
+            # to numpy
+            result.append(np.asarray(inliers.points))
+        return result
+
 
     @staticmethod
     def sample_pointcloud(
@@ -154,8 +210,9 @@ class Depth:
         pcds: List[np.ndarray],
         rgbs: List[np.ndarray],
         K: Optional[np.ndarray] = None,
-        s: Optional[float] = 1
-    ) -> np.ndarray:
+        s: Optional[float] = 1,
+        out: Optional[str] = 'numpy'
+    ) -> Union[np.ndarray, plt.Figure]:
         if K is None:
             K = Depth.predict_intrinsic(size[0], size[1])
         
@@ -176,15 +233,18 @@ class Depth:
         ax.set_zlabel('Y')
 
         # drawing
-        fig.canvas.draw()
-        data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        image = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
+        if out == 'numpy':
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            image = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
 
-        plt.close(fig)
+            plt.close(fig)
 
-        # fit to size
-        ratio = size[1] / image.shape[0]
-        image = cv2.resize(image, dsize=None, fx=ratio, fy=ratio)
+            # fit to size
+            ratio = size[1] / image.shape[0]
+            image = cv2.resize(image, dsize=None, fx=ratio, fy=ratio)
 
-        return image
+            return image
+        else:
+            return fig

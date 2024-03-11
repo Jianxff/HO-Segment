@@ -19,3 +19,6 @@ dependencies:
     - timm==0.6.7
     - tqdm
     - matplotlib
+    - cvzone
+    - mediapipe
+    - open3d

@@ -32,22 +32,25 @@ bash scripts/download_checkpoints.sh
 ```
 
 ## Interface
-1. Segment Pipeline
+1. Segment HOSegment
 ```python
-from modules import Pipeline
+from modules import HOSegment
 
-pipe = Pipeline(
+seg_pipe = HOSegment(
     work_dirs: Union[str, Path], # checkpoints dirs
     device: Optional[str] = 'cuda:0' # cuda device
 )
 
-res = pipe(
+res = seg_pipe(
     image: Union[str, Path, np.ndarray], # input image from numpy array or filename
 )
 
 res: dict({
     'hands': np.ndarray, # segment result of hands
-    'objects': np.ndarray # segment result of objects
+    'objects': np.ndarray, # segment result of objects
+    'hands_t': bool, # is hand detected
+    'objects_t': bool, # is object detected
+    'cb': np.ndarray # segment result of hand-object contour bound
 })
 ```
 
@@ -55,9 +58,9 @@ res: dict({
 ```python
 from modules import Depth
 
-depth = Depth()
+depth_pipe = Depth()
 
-depth = depth.infer(
+depth = depth_pipe.infer(
     image: Union[np.ndarray, str, Path] # image data or filepath
 )
 
@@ -65,12 +68,12 @@ depth: np.ndarray # float64 depth map
 
 pcds = depth.sample_pointcloud_open3d(
     depth: np.ndarray, # depth image (float)
-    masks: Union[np.ndarray, List[np.ndarray]] = None, # masks for sampling 
+    K: Optional[Tuple[float,float,int,int]] = None, #(fx,fy,cx,cy)
     neighbors: Optional[int] = 20, # sample params
     std_ratio: Optional[float] = 2.0, # sample params
 )
 
-pcds: List[np.ndarray] # list of points sampled with masks
+pcds: open3d.geometry.PointCloud # Open3d PointCloud
 ```
 
 
@@ -112,21 +115,21 @@ streamlit run app_image.py
 ```bash
 python -m scripts.predict_image --image ${path/to/input} --save ${path/to/output}
 
-## demo: python -m scripts.predict_image --image demo/images/1.jpg --sace demo/out/1.seg.png
+## demo: python -m scripts.predict_image --image demo/images/1.jpg --output demo/out/1.seg.png
 ```
 ![seg](assets/seg.png)
 
 
 4. **Predict Hand-Object pointclouds from single image**  
 ```bash
-python -m scripts.predict_pcd --image ${path/to/input} --save{path/to/output}
+python -m scripts.predict_pcd --image ${path/to/input} --outout ${path/to/output}
 
-## demo: python -m scripts.predict_pcd --image demo/images/1.jpg --sace demo/out/1.pcd.png
+## demo: python -m scripts.predict_pcd --image demo/images/1.jpg --output demo/out/result
 ```
 ![pcd](assets/pcd.png)
 
 
 5. **Predict Hand-Object pointclouds from video**  
 ```bash
-python -m scripts.predict_pcd --video ${path/to/input} --save{path/to/output}
+python -m scripts.predict_pcd --video ${path/to/input} --outout ${path/to/output}
 ```

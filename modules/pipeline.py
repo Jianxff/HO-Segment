@@ -14,17 +14,22 @@ from cvzone.HandTrackingModule import HandDetector
 # MM Segmentation
 from mmseg.apis import init_segmentor, InferencePipe
 
-class Pipeline:
+class HOSegment:
+    type_parallel_: False
+
     def __init__(
         self,
         work_dirs: Union[str, Path],
+        box_detect: Optional[bool] = False,
+        parallel: Optional[bool] = False,
         device: Optional[str] = 'cuda:0'
     ) -> None:
+        self.box_detect_ = box_detect
+        self.type_parallel_ = parallel
         self.load(
             work_dirs=work_dirs,
             device=device
         )
-        
 
     def load(
         self,
@@ -34,31 +39,42 @@ class Pipeline:
         work_dirs = Path(work_dirs)
 
         # build the model from a config file and a checkpoint file
-        self.pipe_hands = InferencePipe(
-            model = init_segmentor(
-                config=str(work_dirs / 'seg_twohands_ccda' / 'seg_twohands_ccda.py'),
-                checkpoint=str(work_dirs / 'seg_twohands_ccda' / 'best_mIoU_iter_56000.pth'),
-                device=device
+        if not self.type_parallel_:
+            self.pipe_hands = InferencePipe(
+                model = init_segmentor(
+                    config=str(work_dirs / 'seg_twohands_ccda' / 'seg_twohands_ccda.py'),
+                    checkpoint=str(work_dirs / 'seg_twohands_ccda' / 'best_mIoU_iter_56000.pth'),
+                    device=device
+                )
             )
-        )
 
-        self.pipe_cb = InferencePipe(
-            model = init_segmentor(
-                config=str(work_dirs / 'twohands_to_cb_ccda' / 'twohands_to_cb_ccda.py'),
-                checkpoint=str(work_dirs / 'twohands_to_cb_ccda' / 'best_mIoU_iter_76000.pth'),
-                device=device
+            self.pipe_cb = InferencePipe(
+                model = init_segmentor(
+                    config=str(work_dirs / 'twohands_to_cb_ccda' / 'twohands_to_cb_ccda.py'),
+                    checkpoint=str(work_dirs / 'twohands_to_cb_ccda' / 'best_mIoU_iter_76000.pth'),
+                    device=device
+                )
             )
-        )
 
-        self.pipe_obj = InferencePipe(
-            model = init_segmentor(
-                config=str(work_dirs / 'twohands_cb_to_obj1_ccda' / 'twohands_cb_to_obj1_ccda.py'),
-                checkpoint=str(work_dirs / 'twohands_cb_to_obj1_ccda' / 'best_mIoU_iter_34000.pth'),
-                device=device
+            self.pipe_obj = InferencePipe(
+                model = init_segmentor(
+                    config=str(work_dirs / 'twohands_cb_to_obj1_ccda' / 'twohands_cb_to_obj1_ccda.py'),
+                    checkpoint=str(work_dirs / 'twohands_cb_to_obj1_ccda' / 'best_mIoU_iter_34000.pth'),
+                    device=device
+                )
             )
-        )
 
-        self.hand_detector = HandDetector(detectionCon=0.1, maxHands=2)
+        else:
+            self.pipe_parallel = InferencePipe(
+                model= init_segmentor(
+                    config=str(work_dirs / 'seg_handobj1' / 'seg_handobj1.py'),
+                    checkpoint=str(work_dirs / 'seg_handobj1' / 'best_mIoU_iter_62000.pth'),
+                    device=device
+                )
+            )
+
+        if self.box_detect_:
+            self.hand_detector = HandDetector(detectionCon=0.1, maxHands=2)
 
         return self
 
@@ -69,22 +85,36 @@ class Pipeline:
         hands_only: Optional[bool] = False
     ) -> dict[str, np.ndarray]:
         # inference
-        seg_data = {'hands': None, 'objects': 'None'}
+        seg_data = {'hands': None, 'objects': 'None', 'hands_t': False, 'objects_t': False}
         bound_data = np.zeros((image.shape[0], image.shape[1]))
 
         def target_ho(seg_data):
-            seg_result_hands = self.pipe_hands(image)
+            if not self.type_parallel_:
+                seg_result_hands = self.pipe_hands(image)
 
-            if hands_only:
-                seg_data['hands'] = seg_result_hands
-                seg_data['objects'] = np.zeros_like(seg_result_hands)
-                return
+                if hands_only:
+                    seg_result_obj = np.zeros_like(seg_result_hands)
+                    seg_result_cb = np.zeros_like(seg_result_hands)
+                else:
+                    seg_result_cb = self.pipe_cb(image, seg_result_hands)
+                    seg_result_obj = self.pipe_obj(image, seg_result_hands, seg_result_cb)
 
-            seg_result_cb = self.pipe_cb(image, seg_result_hands)
-            seg_result_obj = self.pipe_obj(image, seg_result_hands, seg_result_cb)
+            else:
+                seg_result_ho = self.pipe_parallel(image)
+
+                seg_result_hands = np.zeros_like(seg_result_ho)
+                seg_result_hands[seg_result_ho == 1] = 1
+                seg_result_hands[seg_result_ho == 2] = 2
+                
+                seg_result_obj = np.zeros_like(seg_result_ho)
+                seg_result_obj[seg_result_ho == 3] = 1
+                seg_result_obj[seg_result_ho == 4] = 2
+                seg_result_obj[seg_result_ho == 5] = 3
 
             seg_data['hands'] = seg_result_hands
-            seg_data['objects'] = seg_result_obj         
+            seg_data['objects'] = seg_result_obj
+            seg_data['cb'] = seg_result_cb
+
 
         def target_bound(bound_data):
             hands, _ = self.hand_detector.findHands(image, draw=False)
@@ -109,9 +139,14 @@ class Pipeline:
         # t1.join()
         # t2.join()
         target_ho(seg_data)
-        target_bound(bound_data)
 
-        seg_data['hands'][bound_data == 0] = 0
+        if self.box_detect_:
+            target_bound(bound_data)
+            seg_data['hands'][bound_data == 0] = 0
+        
+        seg_data['hands_t'] = (seg_data['hands'] > 0).any()
+        seg_data['objects_t'] = (seg_data['objects'] > 0).any()
+        
         return seg_data
 
 

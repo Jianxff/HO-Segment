@@ -12,11 +12,11 @@ from streamlit_webrtc import webrtc_streamer
 import av
 
 # EgoHOS
-from modules import Pipeline, Streaming
+from modules import HOSegment, Streaming
 
 @st.cache_resource()
 def create_pipe():
-    return Pipeline(work_dirs='./work_dirs')
+    return HOSegment(work_dirs='./work_dirs', parallel=False)
 
 pipe = create_pipe()
 
@@ -37,7 +37,7 @@ def video_frame_callback(frame: np.ndarray):
     data = streaming.get()
 
     if data is not None:
-        img = Pipeline.visualize(image=img, result=data).astype(np.uint8)
+        img = HOSegment.visualize(image=img, result=data).astype(np.uint8)
 
     return av.VideoFrame.from_ndarray(img, format="bgr24")
 

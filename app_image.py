@@ -11,13 +11,12 @@ import matplotlib.pyplot as plt
 # Streamlit
 import streamlit as st
 
-# EgoHOS
-from modules import Pipeline, Depth
-
 @st.cache_resource()
 def init_models():
-    depth = Depth()
-    pipe = Pipeline(work_dirs='./work_dirs')
+    # EgoHOS
+    from modules import HOSegment, Depth
+    depth = Depth(absolute=False)
+    pipe = HOSegment(work_dirs='./work_dirs', parallel=True)
     return depth, pipe
 
 depth, pipe = init_models()
@@ -51,12 +50,17 @@ def rgb_to_pointclouds(image: np.ndarray) -> plt.Figure:
         s=0.5,
         out='plt'
     )
+    from modules import HOSegment, Depth
+    seg_pic = HOSegment.visualize(image, seg_mask)
+    seg_pic = cv2.cvtColor(seg_pic, cv2.COLOR_BGR2RGB)
+    depth_pic = Depth.gray(depth_map, bgr=True)
 
-    return pcd_fig, depth_time, seg_time, sample_time
+    return pcd_fig, seg_pic, depth_pic, depth_time, seg_time, sample_time
 
 
 
 st.title('RGB to Hand-Object PointClouds')
+
 
 choice = st.radio(
     "Select an image source:",
@@ -64,21 +68,31 @@ choice = st.radio(
     horizontal=True
 )
 
+main_col, plot_col = st.columns(2)
+
 if choice == ":rainbow[From Camera]":
-    image = st.camera_input("Take an image from webcam")
+    image = main_col.camera_input("Take an image from webcam")
 elif choice == "**From Files**":
-    image = st.file_uploader("Upload an image", type=['jpg', 'png', 'jpeg'])
+    image = main_col.file_uploader("Upload an image", type=['jpg', 'png', 'jpeg'])
 
 if image is not None:
     img = Image.open(image)
     img_array = np.array(img)
     img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
 
-    fig, t1, t2, t3 = rgb_to_pointclouds(img_array)
+    fig, pic, depth, t1, t2, t3 = rgb_to_pointclouds(img_array)
 
-    # plot
-    st.pyplot(fig)
-    # write time
-    st.write(f"Depth Time: {t1:.2f} sec")
-    st.write(f"Segment Time: {t2:.2f} sec")
-    st.write(f"Sample Time: {t3:.2f} sec")
+    # cols
+    col1, col2 = main_col.columns(2)
+    col1.image(depth, caption=f'Depth Estimation in {t1:.2f}s')
+    col2.image(pic, caption=f'Segmentation in {t2:.2f}s')
+
+    # pintcloud
+    plot_col.write(f"Sample PointCloud in {t3:.2f}s")
+    # pyplot
+    elev = plot_col.slider("elev", min_value=0, max_value=90, value=45)
+    azim = plot_col.slider("azim", min_value=0, max_value=360, value=180)
+    fig_, ax = fig
+    ax.view_init(elev=elev, azim=azim)
+    plot_col.pyplot(fig_)
+    

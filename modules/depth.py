@@ -1,4 +1,5 @@
 # Standard Library
+from transformers import pipeline
 from pathlib import Path
 from typing import Any, Optional, Union, List, Tuple
 import time
@@ -12,15 +13,20 @@ import open3d
 import matplotlib.pyplot as plt
 
 class Depth:
+    estimate_absolute:bool = False
 
-    def __init__(self) -> None:
-        repo = "isl-org/ZoeDepth"
-        # Zoe_N
-        model_zoe_nk = torch.hub.load(repo, "ZoeD_NK", pretrained=True)
+    def __init__(self, absolute: False) -> None:
+        self.estimate_absolute = absolute
 
-        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+        if absolute:
+            repo = "isl-org/ZoeDepth"
+            # Zoe_NK
+            model_zoe_nk = torch.hub.load(repo, "ZoeD_NK", pretrained=True)
+            DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+            self.zoe_ = model_zoe_nk.to(DEVICE)
 
-        self.zoe_ = model_zoe_nk.to(DEVICE)
+        else:
+            self.depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf")
 
     @torch.no_grad()
     def infer(
@@ -32,12 +38,22 @@ class Depth:
         
         if image is None:
             return None
-        # st = time.time()
-        depth = self.zoe_.infer_pil(
-            Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        )
-        # nd = time.time()
-        # print(f"Depth Time: {nd-st:.2f} sec")
+
+        if self.estimate_absolute:
+            depth = self.zoe_.infer_pil(
+                Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            )
+        else:    
+            depth = self.depth_pipe(
+                Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            )["depth"]
+
+        depth = np.array(depth)
+        # uint8 to float32
+        depth = depth.astype(np.float32)
+
+        if not self.estimate_absolute:
+            depth = depth * 2 / 255.0
 
         return depth
 
@@ -48,7 +64,7 @@ class Depth:
     ) -> np.ndarray:
         min_val = np.min(depth)
         max_val = np.max(depth)
-        depth = ((1 - (depth - min_val) / (max_val - min_val)) * 255).astype(np.uint8)
+        depth = (((depth - min_val) / (max_val - min_val)) * 255).astype(np.uint8)
 
         if bgr: depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2BGR)
         
@@ -59,7 +75,7 @@ class Depth:
         width: int,
         height: int
     ) -> np.ndarray:
-        b = np.max([height, width])
+        b = np.max([height, width]) * 1.2
         K = np.array([
             [b, 0, width//2],
             [0, b, height//2],
@@ -70,35 +86,60 @@ class Depth:
     @staticmethod
     def sample_pointcloud_open3d(
         depth: np.ndarray,
-        masks: Union[np.ndarray, List[np.ndarray]] = None,
-        # K: Optional[np.ndarray] = None,
+        K: Optional[Tuple[float,float,int,int]] = None, #(fx,fy,cx,cy)
+        trunc: Optional[float] = 1000.0,
         neighbors: Optional[int] = 20,
         std_ratio: Optional[float] = 2.0,
-    ) -> List[np.ndarray]:
-        if not isinstance(masks, list):
-            masks = [masks]
+    ) -> open3d.geometry.PointCloud:
         h, w = depth.shape
+        if K is None:
+            K = (max(w, h) * 1.2, max(w, h), w//2, h//2)
         K = open3d.camera.PinholeCameraIntrinsic(
             width=w, height=h,
-            fx = max(w, h), fy = max(w, h),
-            cx = w//2, cy = h//2
+            fx = K[0], fy = K[1], cx = K[2], cy = K[3]
         )
-        result = []
-        for mask in masks:
-            # select from mask
-            depth_masked = depth.copy()
-            depth_masked[mask == 0] = 0
+        depth = open3d.geometry.Image(depth)
+        pcd = open3d.geometry.PointCloud.create_from_depth_image(
+            depth, K,
+            depth_scale=1.0, depth_trunc=trunc,    
+        )
+        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=neighbors, std_ratio=std_ratio)
+        filtered_pcd = pcd.select_by_index(ind)
+        return filtered_pcd
 
-            depth_masked = open3d.geometry.Image(depth_masked)
-            pcd = open3d.geometry.PointCloud.create_from_depth_image(
-                depth_masked, K,
-                depth_scale=1.0, depth_trunc=100.0,    
-            )
-            cl, ind = pcd.remove_statistical_outlier(nb_neighbors=neighbors, std_ratio=std_ratio)
-            filtered_pcd = pcd.select_by_index(ind)
-            # to numpy
-            result.append(np.asarray(filtered_pcd.points))
-        return result
+    # @staticmethod
+    # def sample_pointclouds_open3d(
+    #     depth: np.ndarray,
+    #     masks: Union[np.ndarray, List[np.ndarray]] = None,
+    #     K: Optional[Tuple[float,float,int,int]] = None, #(fx,fy,cx,cy)
+    #     neighbors: Optional[int] = 20,
+    #     std_ratio: Optional[float] = 2.0,
+    # ) -> Tuple[List[open3d.geometry.PointCloud]]:
+    #     if not isinstance(masks, list):
+    #         masks = [masks]
+    #     h, w = depth.shape
+    #     if K is None:
+    #         K = (max(w, h) * 1.2, max(w, h), w//2, h//2)
+    #     K = open3d.camera.PinholeCameraIntrinsic(
+    #         width=w, height=h,
+    #         fx = K[0], fy = K[1], cx = K[2], cy = K[3]
+    #     )
+    #     result = []
+    #     for mask in masks:
+    #         # select from mask
+    #         depth_masked = depth.copy()
+    #         depth_masked[mask == 0] = 0
+
+    #         depth_masked = open3d.geometry.Image(depth_masked)
+    #         pcd = open3d.geometry.PointCloud.create_from_depth_image(
+    #             depth_masked, K,
+    #             depth_scale=1.0, depth_trunc=100.0,    
+    #         )
+    #         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=neighbors, std_ratio=std_ratio)
+    #         filtered_pcd = pcd.select_by_index(ind)
+    #         result.append(filtered_pcd)
+
+    #     return result
 
     @staticmethod
     def sample(
@@ -221,16 +262,21 @@ class Depth:
 
         for i in range(len(pcds)):
             p, c = pcds[i], np.array(rgbs[i]) / 255
+            if isinstance(p, open3d.geometry.PointCloud):
+                p = np.asarray(p.points)
             if len(p) == 0:
                 continue
-
-            p[:, 1] *= -1
-            p[:, 2] *= -1
-            ax.scatter(p[:, 2], p[:, 0], p[:, 1], s=s, c=[c], marker='o')
+            ax.scatter(p[:, 0], p[:, 2] , -1 * p[:, 1], s=s, c=[c], marker='o')
         
+        ax.view_init(azim=-80, elev=15)
         ax.set_xlabel('X')
         ax.set_ylabel('Z')
         ax.set_zlabel('Y')
+
+        ax.set_xlim(-0.2, 0.2)
+        ax.set_ylim(0.3, 0.7)
+        ax.set_zlim(-0.3, 0.1)
+        # ax.set_aspect('equal')
 
         # drawing
         if out == 'numpy':
@@ -247,4 +293,4 @@ class Depth:
 
             return image
         else:
-            return fig
+            return (fig, ax)
